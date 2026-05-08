@@ -1,24 +1,22 @@
-# ABLATION (no_skip): variant of train_v2.py with decoder skip connections
-# removed. Decoder channel widths are rebalanced because the concat inputs
-# go away: dec3 input drops from 192->96, dec2 from 96->48, dec1 from 48->24.
+# ABLATION (no_skip)
 import os
 import sys
-# ABLATION: ensure repo root is importable so `dataset_modified` resolves when
-# running `python ablation/train_no_skip.py` from the repo root.
+ 
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-# Ensure your dataset_modified.py is in the same folder
+
 from dataset_modified import NoisyCleanFrameDataset
 
 # --- Configuration ---
 CLEAN_DIR = "data/clean"
 NOISE_DIR = "data/noise"
-CLEAN_VAL_DIR = "data/clean_val"   # Added: folder for validation clean files
-NOISE_VAL_DIR = "data/noise_val"   # Added: folder for validation noise files
+CLEAN_VAL_DIR = "data/clean_val"   #  folder for validation clean files
+NOISE_VAL_DIR = "data/noise_val"   #  folder for validation noise files
 BATCH = 32
 EPOCHS = 30
 LR = 1e-3
@@ -26,15 +24,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # ABLATION (no_skip): redirected save path to ablation/outputs/ tree.
 MODEL_SAVE_PATH = "ablation/outputs/no_skip.pth"  # New save path to preserve original
 
-# -----------------------
-# 1. Upgraded U-Net Architecture
-# Changes from v1:
-# - Increased channel capacity: 1->16->32->64 becomes 1->24->48->96->192
-# - Added 4th encoder stage (96->192) for deeper feature extraction
-# - Added matching 4th decoder stage with skip connection
-# - All stages retain BatchNorm after every conv/convtranspose
-# - Mask floor clamp(min=0.05) retained to prevent musical noise
-# - Total parameters: ~480K - within Pi 5 real-time budget
+
 # -----------------------
 # ABLATION (no_skip): decoder skip concatenations removed; channel widths shrunk accordingly.
 class UNetMasker(nn.Module):
@@ -44,15 +34,15 @@ class UNetMasker(nn.Module):
         self.enc1 = nn.Conv2d(1, 24, 3, stride=1, padding=1)       # Full resolution
         self.enc2 = nn.Conv2d(24, 48, 3, stride=2, padding=1)      # /2 resolution
         self.enc3 = nn.Conv2d(48, 96, 3, stride=2, padding=1)      # /4 resolution
-        self.enc4 = nn.Conv2d(96, 192, 3, stride=2, padding=1)     # /8 resolution - NEW stage
-        # Added: BatchNorm layers for encoder (stabilises training, speeds convergence)
+        self.enc4 = nn.Conv2d(96, 192, 3, stride=2, padding=1)     # /8 resolution 
+        # BatchNorm layers for encoder (stabilises training, speeds convergence)
         self.bn_e1 = nn.BatchNorm2d(24)
         self.bn_e2 = nn.BatchNorm2d(48)
         self.bn_e3 = nn.BatchNorm2d(96)
-        self.bn_e4 = nn.BatchNorm2d(192)                            # NEW BatchNorm for enc4
+        self.bn_e4 = nn.BatchNorm2d(192)                            # BatchNorm for enc4
 
         # Decoder
-        self.dec4 = nn.ConvTranspose2d(192, 96, 4, stride=2, padding=1)    # NEW stage
+        self.dec4 = nn.ConvTranspose2d(192, 96, 4, stride=2, padding=1)    
         # ABLATION (no_skip): dec3 input shrinks from 192 (cat[d4,e3]) to 96 (d4 alone).
         # self.dec3 = nn.ConvTranspose2d(192, 48, 4, stride=2, padding=1)    # Input: cat[dec4, e3] = 192
         self.dec3 = nn.ConvTranspose2d(96, 48, 4, stride=2, padding=1)
@@ -62,8 +52,8 @@ class UNetMasker(nn.Module):
         # ABLATION (no_skip): dec1 input shrinks from 48 (cat[d2,e1]) to 24 (d2 alone).
         # self.dec1 = nn.Conv2d(48, 1, 3, stride=1, padding=1)               # Input: cat[dec2, e1] = 48
         self.dec1 = nn.Conv2d(24, 1, 3, stride=1, padding=1)
-        # Added: BatchNorm layers for decoder
-        self.bn_d4 = nn.BatchNorm2d(96)                             # NEW BatchNorm for dec4
+        # BatchNorm layers for decoder
+        self.bn_d4 = nn.BatchNorm2d(96)                           
         self.bn_d3 = nn.BatchNorm2d(48)
         self.bn_d2 = nn.BatchNorm2d(24)
 
@@ -72,14 +62,14 @@ class UNetMasker(nn.Module):
         x_log = torch.log1p(x)
 
         # Encoder passes
-        # Added: BatchNorm inserted between conv and activation in each encoder stage
+        # BatchNorm inserted between conv and activation in each encoder stage
         e1 = F.leaky_relu(self.bn_e1(self.enc1(x_log)), 0.2)
         e2 = F.leaky_relu(self.bn_e2(self.enc2(e1)), 0.2)
         e3 = F.leaky_relu(self.bn_e3(self.enc3(e2)), 0.2)
         e4 = F.leaky_relu(self.bn_e4(self.enc4(e3)), 0.2)          # NEW encoder stage
 
         # Decoder 4 -> Resize to match e3 (Skip Connection 1) - NEW
-        # Added: BatchNorm inserted between convtranspose and activation in each decoder stage
+        # BatchNorm inserted between convtranspose and activation in each decoder stage
         d4 = F.leaky_relu(self.bn_d4(self.dec4(e4)), 0.2)
         if d4.shape[-2:] != e3.shape[-2:]:
             d4 = F.interpolate(d4, size=e3.shape[-2:], mode="bilinear", align_corners=False)
@@ -97,7 +87,7 @@ class UNetMasker(nn.Module):
             d2 = F.interpolate(d2, size=e1.shape[-2:], mode="bilinear", align_corners=False)
 
         # Final Mask Generation (Sigmoid forces values between 0.0 and 1.0)
-        # Added: .clamp(min=0.05) prevents mask going to near-zero which causes musical noise artifacts
+        # clamp(min=0.05) prevents mask going to near-zero which causes musical noise artifacts
         # ABLATION (no_skip): feed only d2 into dec1 (no concat with e1).
         mask = torch.sigmoid(self.dec1(d2)).clamp(min=0.05)
 
@@ -138,7 +128,7 @@ def main():
     )
     dl = DataLoader(ds, batch_size=BATCH, shuffle=True, drop_last=True)
 
-    # Added: Validation dataset and loader (points to held-out folder)
+    # Validation dataset and loader (points to held-out folder)
     val_ds = NoisyCleanFrameDataset(
         CLEAN_VAL_DIR, NOISE_VAL_DIR,
         snr_min=0, snr_max=10,
@@ -152,7 +142,7 @@ def main():
 
     model = UNetMasker().to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    # Added: CosineAnnealingLR scheduler - gradually reduces LR to help converge cleanly
+    # CosineAnnealingLR scheduler - gradually reduces LR to help converge cleanly
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
     # MSE Loss on Log-Magnitude creates the highest contrast for "black" silence
@@ -191,7 +181,7 @@ def main():
         train_losses.append(avg_loss)
         print(f"Epoch [{epoch+1:02d}/{EPOCHS}] | Train Loss: {avg_loss:.6f}", end="")
 
-        # Added: Validation loop - evaluates on held-out data to detect overfitting
+        # Validation loop - evaluates on held-out data to detect overfitting
         model.eval()
         val_total = 0.0
         with torch.no_grad():
@@ -205,7 +195,7 @@ def main():
         val_losses.append(avg_val_loss)
         print(f" | Val Loss: {avg_val_loss:.6f}")
 
-        # Added: Step the scheduler at the end of each epoch
+        # Step the scheduler at the end of each epoch
         scheduler.step()
 
         # Save the best model

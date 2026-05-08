@@ -1,23 +1,16 @@
 # ABLATION driver: trains every variant sequentially, then evaluates each
-# trained model on the same 9-condition (3 noises x 3 SNRs) grid used in
-# evaluate.py, and prints a single comparison table that includes the full v2
-# baseline's published result (+5.2 dB).
-#
-# Run from the repo root:
-#     python ablation/evaluate_all.py
+
 import os
 import sys
 import argparse
 import numpy as np
 import librosa
 import torch
-# PESQ (wideband) and STOI — added for the three-metric comparison. Both libs
-# are already used by the project's metrics.py; install with pip if missing.
+
 from pesq import pesq as pesq_fn
 from pystoi import stoi as stoi_fn
 
-# Put repo root and the ablation/ folder on sys.path so both `dataset_modified`
-# and the per-variant training modules import cleanly.
+
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(THIS_DIR)
 for p in (REPO_ROOT, THIS_DIR):
@@ -31,10 +24,10 @@ from train_no_clamp       import UNetMasker as UNetMasker_no_clamp,       main a
 from train_no_skip        import UNetMasker as UNetMasker_no_skip,        main as train_no_skip_main
 from train_linear_scaling import UNetMasker as UNetMasker_linear_scaling, main as train_linear_scaling_main
 from train_constant_lr    import UNetMasker as UNetMasker_constant_lr,    main as train_constant_lr_main
-# Full v2 model — evaluation only; no training entry point is registered here.
+
 from train_v2             import UNetMasker as UNetMasker_v2
 
-# --- STFT / patch config (must match training and evaluate.py) ---
+# --- STFT / patch config 
 SR = 16000
 N_FFT = 512
 HOP = 128
@@ -42,7 +35,7 @@ WIN = 512
 PATCH_FRAMES = 64
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# --- 9-condition test grid (identical to evaluate.py) ---
+# --- 9-condition test grid 
 CLEAN_FILE = "data/clean/1221-135767-0013.wav"
 NOISE_FILES = {
     "Dog bark (natural)":       "data/noise/1-40730-A-1.wav",
@@ -54,7 +47,7 @@ SNR_CONDITIONS = [0, 5, 10]
 # Variants to train + evaluate. Each entry is (display_name, checkpoint_path,
 # UNetMasker class, training entry-point).
 VARIANTS = [
-    # Full v2 is evaluation-only — train_main is None, Phase 1 skips it.
+    
     ("full_v2",        "outputs/unet_mask_denoiser_v2.pth",    UNetMasker_v2,             None),
     ("no_bn",          "ablation/outputs/no_bn.pth",          UNetMasker_no_bn,          train_no_bn_main),
     ("no_clamp",       "ablation/outputs/no_clamp.pth",       UNetMasker_no_clamp,       train_no_clamp_main),
@@ -63,16 +56,15 @@ VARIANTS = [
     ("constant_lr",    "ablation/outputs/constant_lr.pth",    UNetMasker_constant_lr,    train_constant_lr_main),
 ]
 
-# Published full-v2 baseline — provided by the user, not retrained here.
+
 V2_BASELINE_AVG_DB = 5.2
-# Published full-v2 baselines for the three-metric comparison — user-provided.
 V2_BASELINE_AVG_SNR  = 5.23
 V2_BASELINE_AVG_PESQ = 2.364
 V2_BASELINE_AVG_STOI = 0.895
 
 
 # -----------------------
-# Helpers (copied from evaluate.py so this script is self-contained)
+# Helpers 
 # -----------------------
 def mix_at_snr(clean, noise, snr_db):
     # Tile noise if shorter than clean signal
@@ -88,7 +80,7 @@ def mix_at_snr(clean, noise, snr_db):
 
 
 def compute_snr(clean, signal):
-    # SNR using clean reference; matches evaluate.py exactly.
+    # SNR using clean reference
     noise = clean - signal
     signal_power = np.mean(clean**2)
     noise_power  = np.mean(noise**2) + 1e-8
@@ -145,7 +137,7 @@ def evaluate_variant(name, ckpt_path, model_cls, clean):
     # Loads one variant's checkpoint and runs the full 9-condition sweep,
     # returning the mean SNR improvement (output SNR - input SNR) across
     # all 9 conditions.
-    # Extended: now also computes PESQ (wideband) and STOI on both noisy and
+    # also computes PESQ (wideband) and STOI on both noisy and
     # denoised signals per condition, and returns the mean output-side PESQ
     # and STOI alongside the mean SNR improvement.
     print(f"\n--- Evaluating variant: {name} ({ckpt_path}) ---")
@@ -197,7 +189,6 @@ def evaluate_variant(name, ckpt_path, model_cls, clean):
 # Main driver
 # -----------------------
 def main():
-    # Parse CLI; --eval-only skips Phase 1 and evaluates existing checkpoints.
     parser = argparse.ArgumentParser(description="Ablation training + evaluation driver.")
     parser.add_argument("--eval-only", action="store_true",
                         help="Skip Phase 1 training; evaluate existing checkpoints only.")

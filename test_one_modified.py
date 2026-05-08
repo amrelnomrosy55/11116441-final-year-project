@@ -9,13 +9,13 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 # -----------------------
-# Configuration (Must match Training)
+# Configuration 
 # -----------------------
 SR = 16000
 N_FFT = 512
 HOP = 128
 WIN = 512
-PATCH_FRAMES = 64  # Updated to 64 to match your training context
+PATCH_FRAMES = 64  
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_PATH = "outputs/unet_mask_denoiser_v2.pth"
 
@@ -30,7 +30,7 @@ class UNetMasker(nn.Module):
         self.enc2 = nn.Conv2d(24, 48, 3, stride=2, padding=1)
         self.enc3 = nn.Conv2d(48, 96, 3, stride=2, padding=1)
         self.enc4 = nn.Conv2d(96, 192, 3, stride=2, padding=1)
-        # Added: BatchNorm layers for encoder (stabilises training, speeds convergence)
+        # BatchNorm layers for encoder (stabilises training, speeds convergence)
         self.bn_e1 = nn.BatchNorm2d(24)
         self.bn_e2 = nn.BatchNorm2d(48)
         self.bn_e3 = nn.BatchNorm2d(96)
@@ -40,22 +40,22 @@ class UNetMasker(nn.Module):
         self.dec3 = nn.ConvTranspose2d(192, 48, 4, stride=2, padding=1)
         self.dec2 = nn.ConvTranspose2d(96, 24, 4, stride=2, padding=1)
         self.dec1 = nn.Conv2d(48, 1, 3, stride=1, padding=1)
-        # Added: BatchNorm layers for decoder
+        # BatchNorm layers for decoder
         self.bn_d4 = nn.BatchNorm2d(96)
         self.bn_d3 = nn.BatchNorm2d(48)
         self.bn_d2 = nn.BatchNorm2d(24)
 
     def forward(self, x):
-        # Apply Log-Scaling to help model "see" the noise floor (-80dB)
+        # Log-Scaling to help model "see" the noise floor (-80dB)
         x_log = torch.log1p(x)
         # Encoder passes
-        # Added: BatchNorm inserted between conv and activation in each encoder stage
+        # BatchNorm inserted between conv and activation in each encoder stage
         e1 = F.leaky_relu(self.bn_e1(self.enc1(x_log)), 0.2)
         e2 = F.leaky_relu(self.bn_e2(self.enc2(e1)), 0.2)
         e3 = F.leaky_relu(self.bn_e3(self.enc3(e2)), 0.2)
         e4 = F.leaky_relu(self.bn_e4(self.enc4(e3)), 0.2)
         # Decoder 4 -> Resize to match e3 (Skip Connection 1)
-        # Added: BatchNorm inserted between convtranspose and activation in each decoder stage
+        # BatchNorm inserted between convtranspose and activation in each decoder stage
         d4 = F.leaky_relu(self.bn_d4(self.dec4(e4)), 0.2)
         if d4.shape[-2:] != e3.shape[-2:]:
             d4 = F.interpolate(d4, size=e3.shape[-2:], mode="bilinear", align_corners=False)
@@ -68,7 +68,7 @@ class UNetMasker(nn.Module):
         if d2.shape[-2:] != e1.shape[-2:]:
             d2 = F.interpolate(d2, size=e1.shape[-2:], mode="bilinear", align_corners=False)
         # Final Mask Generation (Sigmoid forces values between 0.0 and 1.0)
-        # Added: .clamp(min=0.05) prevents mask going to near-zero which causes musical noise artifacts
+        # clamp(min=0.05) prevents mask going to near-zero which causes musical noise artifacts
         mask = torch.sigmoid(self.dec1(torch.cat([d2, e1], dim=1))).clamp(min=0.05)
         # Ensure mask matches input size exactly
         if mask.shape[-2:] != x.shape[-2:]:
@@ -91,7 +91,7 @@ def mix_at_snr(clean, noise, snr_db):
     noise = noise * (target_noise_rms / (noise_rms + 1e-8))
     return clean + noise
 
-# Added: SNR metric to objectively measure denoising quality (higher dB = better)
+# SNR metric to objectively measure denoising quality (higher dB = better)
 def compute_snr(clean, denoised):
     noise_residual = clean - denoised
     snr = 10 * np.log10(
@@ -116,7 +116,7 @@ def denoise_with_unet(model, noisy_signal):
     out_mag_pad = np.zeros_like(mag_pad)
     weight_pad = np.zeros_like(mag_pad)
 
-    # Added: Hann window for weighted overlap-add - reduces boundary artifacts between patches
+    # Hann window for weighted overlap-add / reduces boundary artifacts between patches
     hann = np.hanning(PATCH_FRAMES).astype(np.float32)
 
     for t0 in range(0, Tpad - PATCH_FRAMES + 1, step):
@@ -153,7 +153,7 @@ def main():
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.eval()
 
-    # Load Files (Update these paths to your test files!)
+    # Load Files 
     clean_path = "data/clean/bigtips_16.wav"
     noise_path = "data/noise/1-88409-A-45.wav"
 
@@ -165,7 +165,7 @@ def main():
     print("Denoising...")
     denoised = denoise_with_unet(model, noisy)
 
-    # Added: Print SNR improvement to objectively compare noisy vs denoised quality
+    # Print SNR improvement to objectively compare noisy vs denoised quality
     snr_noisy = compute_snr(clean, noisy)
     snr_denoised = compute_snr(clean, denoised)
     print(f"SNR (noisy):    {snr_noisy:.2f} dB")

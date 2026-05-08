@@ -12,22 +12,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 from flask import Flask, jsonify, send_from_directory, send_file
 import matplotlib
-matplotlib.use("Agg")  # Non-interactive backend for Pi (no display needed)
+matplotlib.use("Agg")  
 import matplotlib.pyplot as plt
 
 # -----------------------
-# Configuration (Must match Training)
+# Configuration 
 # -----------------------
 SR = 16000
 N_FFT = 512
 HOP = 128
 WIN = 512
 PATCH_FRAMES = 64
-DEVICE = "cpu"  # Raspberry Pi does not have a CUDA GPU
+DEVICE = "cpu"  
 MODEL_PATH = "outputs/unet_mask_denoiser.pth"
 OUTPUT_DIR = "outputs"
 RECORD_SECONDS = 5  # How many seconds to record each time
-RECORD_SR = 44100  # Actual mic sample rate - resampled to SR for the model
+RECORD_SR = 44100  # Actual mic sample rate / resampled to SR for the model
 
 # -----------------------
 # Global state shared between threads
@@ -47,7 +47,7 @@ state = {
 }
 
 # -----------------------
-# 1. Model Architecture (Must match the trained model exactly)
+# 1. Model Architecture 
 # -----------------------
 class UNetMasker(nn.Module):
     def __init__(self):
@@ -56,7 +56,7 @@ class UNetMasker(nn.Module):
         self.enc1 = nn.Conv2d(1, 16, 3, stride=1, padding=1)
         self.enc2 = nn.Conv2d(16, 32, 3, stride=2, padding=1)
         self.enc3 = nn.Conv2d(32, 64, 3, stride=2, padding=1)
-        # Added: BatchNorm layers for encoder (stabilises training, speeds convergence)
+        # BatchNorm layers for encoder (stabilises training, speeds convergence)
         self.bn_e1 = nn.BatchNorm2d(16)
         self.bn_e2 = nn.BatchNorm2d(32)
         self.bn_e3 = nn.BatchNorm2d(64)
@@ -64,20 +64,20 @@ class UNetMasker(nn.Module):
         self.dec3 = nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1)
         self.dec2 = nn.ConvTranspose2d(64, 16, 4, stride=2, padding=1)
         self.dec1 = nn.Conv2d(32, 1, 3, stride=1, padding=1)
-        # Added: BatchNorm layers for decoder
+        # BatchNorm layers for decoder
         self.bn_d3 = nn.BatchNorm2d(32)
         self.bn_d2 = nn.BatchNorm2d(16)
 
     def forward(self, x):
-        # Apply Log-Scaling to help model see the noise floor (-80dB)
+        # Log-Scaling to help model see the noise floor (-80dB)
         x_log = torch.log1p(x)
         # Encoder passes
-        # Added: BatchNorm inserted between conv and activation in each encoder stage
+        # BatchNorm inserted between conv and activation in each encoder stage
         e1 = F.leaky_relu(self.bn_e1(self.enc1(x_log)), 0.2)
         e2 = F.leaky_relu(self.bn_e2(self.enc2(e1)), 0.2)
         e3 = F.leaky_relu(self.bn_e3(self.enc3(e2)), 0.2)
         # Decoder 3 -> Resize to match e2 (Skip Connection 1)
-        # Added: BatchNorm inserted between convtranspose and activation in each decoder stage
+        # BatchNorm inserted between convtranspose and activation in each decoder stage
         d3 = F.leaky_relu(self.bn_d3(self.dec3(e3)), 0.2)
         if d3.shape[-2:] != e2.shape[-2:]:
             d3 = F.interpolate(d3, size=e2.shape[-2:], mode="bilinear", align_corners=False)
@@ -86,7 +86,7 @@ class UNetMasker(nn.Module):
         if d2.shape[-2:] != e1.shape[-2:]:
             d2 = F.interpolate(d2, size=e1.shape[-2:], mode="bilinear", align_corners=False)
         # Final Mask Generation (Sigmoid forces values between 0.0 and 1.0)
-        # Added: .clamp(min=0.05) prevents mask going to near-zero which causes musical noise artifacts
+        # clamp(min=0.05) prevents mask going to near-zero which causes musical noise artifacts
         mask = torch.sigmoid(self.dec1(torch.cat([d2, e1], dim=1))).clamp(min=0.05)
         # Ensure mask matches input size exactly
         if mask.shape[-2:] != x.shape[-2:]:
@@ -96,7 +96,7 @@ class UNetMasker(nn.Module):
 
 
 # -----------------------
-# 2. Denoising Logic (Sliding window with Hann overlap-add)
+# 2. Denoising Logic 
 # -----------------------
 @torch.no_grad()
 def denoise_with_unet(model, noisy_signal):
@@ -111,7 +111,7 @@ def denoise_with_unet(model, noisy_signal):
     Tpad = mag_pad.shape[1]
     out_mag_pad = np.zeros_like(mag_pad)
     weight_pad = np.zeros_like(mag_pad)
-    # Hann window for weighted overlap-add - reduces boundary artifacts between patches
+    # Hann window for weighted overlap-add and reduces boundary artifacts between patches
     hann = np.hanning(PATCH_FRAMES).astype(np.float32)
     for t0 in range(0, Tpad - PATCH_FRAMES + 1, step):
         patch = mag_pad[:, t0:t0 + PATCH_FRAMES]
@@ -163,7 +163,7 @@ def get_spectrogram_columns(signal, n_cols=80):
 # 4b. Spectrogram PNG generator — exact show_spec() logic from test script
 # -----------------------
 def save_spectrogram_png(signal, path, title):
-    # Exact replication of show_spec() from test_one.py:
+   
     # librosa.stft → amplitude_to_db(ref=np.max) → magma colormap
     S = librosa.stft(signal, n_fft=N_FFT, hop_length=HOP, win_length=WIN)
     S_db = librosa.amplitude_to_db(np.abs(S), ref=np.max)
@@ -190,7 +190,7 @@ def save_spectrogram_png(signal, path, title):
     plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")  # Colorbar tick labels in white
     fig.tight_layout()
     fig.savefig(path, dpi=100, bbox_inches="tight", facecolor="black")
-    plt.close(fig)  # Free memory after saving - important on Pi with limited RAM
+    plt.close(fig)  # Free memory after saving / important on Pi with limited RAM
 
 
 # -----------------------
@@ -298,7 +298,7 @@ def api_status():
 
 @app.route("/api/audio/noisy")
 def api_audio_noisy():
-    # Serve the latest noisy audio file — always the most recent recording
+    # Serve the latest noisy audio file and always the most recent recording
     path = os.path.join(OUTPUT_DIR, "noisy_latest.wav")
     if not os.path.exists(path):
         return jsonify({"error": "No noisy audio available"}), 404
@@ -307,7 +307,7 @@ def api_audio_noisy():
 
 @app.route("/api/audio/denoised")
 def api_audio_denoised():
-    # Serve the latest denoised audio file — always the most recent recording
+    # Serve the latest denoised audio file and always the most recent recording
     path = os.path.join(OUTPUT_DIR, "denoised_latest.wav")
     if not os.path.exists(path):
         return jsonify({"error": "No denoised audio available"}), 404
